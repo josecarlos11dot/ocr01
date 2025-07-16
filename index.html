@@ -75,18 +75,27 @@
             const data = await res.json();
             console.log('Respuesta completa:', data);
 
-            const resultado = data.results?.[0];
+          const resultado = data.results?.[0];
 
-            if (resultado) {
-              const placa = resultado.plate.toUpperCase();
-              inputPlaca.value = placa;
-              console.log('Confianza:', resultado.score);
-              console.log('Box:', resultado.box);
-              estadoOCR.textContent = 'Placa detectada ✅';
-            } else {
-              estadoOCR.textContent = 'No se detectó placa ❌';
-              inputPlaca.value = '';
-            }
+          if (resultado) {
+          const placa = resultado.plate.toUpperCase();
+           inputPlaca.value = placa;
+
+          const confianza = resultado.score;
+          console.log('Confianza:', confianza);
+          console.log('Box:', resultado.box);
+
+           if (confianza < 0.85) {
+           estadoOCR.textContent = `Duda en lectura ⚠️ (${placa})`;
+          } else {
+           estadoOCR.textContent = 'Placa detectada ✅';
+          }
+
+} else {
+  estadoOCR.textContent = 'No se detectó placa ❌';
+  inputPlaca.value = '';
+}
+
 
           } catch (err) {
             console.error('Error en OCR:', err);
