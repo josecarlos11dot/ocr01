@@ -2,13 +2,14 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>OCR Placa API</title>
+  <title>OCR Placa API Mejorado</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { font-family: sans-serif; padding: 1rem; }
     input, button { width: 100%; padding: 10px; margin-top: 10px; font-size: 1rem; }
     #estadoOCR { margin-top: 1rem; font-weight: bold; }
     img { max-width: 100%; margin-top: 1rem; border: 1px solid #ccc; }
+    canvas { display: none; }
   </style>
 </head>
 <body>
@@ -31,6 +32,7 @@
       const archivo = e.target.files[0];
       if (!archivo) return;
 
+      // Vista previa de imagen
       const urlPreview = URL.createObjectURL(archivo);
       preview.src = urlPreview;
 
@@ -38,7 +40,16 @@
 
       const formData = new FormData();
       formData.append('upload', archivo);
-      formData.append('regions', 'mx');
+      formData.append('regions', 'mx'); // Fuerza detección en México
+      formData.append('detection_detail', 'true');
+      formData.append('camera_id', 'iphone');
+      formData.append('config', JSON.stringify({
+        blur: false,
+        vehicle_detection: true,
+        multiple_plates: false,
+        country: 'mx',
+        detect_region: true
+      }));
 
       try {
         const res = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
@@ -52,9 +63,22 @@
         const data = await res.json();
         console.log('Respuesta completa:', data);
 
-        const placa = data.results?.[0]?.plate?.toUpperCase() || '';
-        inputPlaca.value = placa;
-        estadoOCR.textContent = placa ? 'Placa detectada ✅' : 'No se detectó placa ❌';
+        const resultado = data.results?.[0];
+
+        if (resultado) {
+          const placa = resultado.plate.toUpperCase();
+          inputPlaca.value = placa;
+
+          // Mostrar información útil en consola
+          console.log('Confianza:', resultado.score);
+          console.log('Coordenadas:', resultado.box);
+          console.log('Procesamiento:', data.processing_time);
+
+          estadoOCR.textContent = 'Placa detectada ✅';
+        } else {
+          estadoOCR.textContent = 'No se detectó placa ❌';
+          inputPlaca.value = '';
+        }
 
       } catch (err) {
         console.error('Error en OCR:', err);
