@@ -2,117 +2,139 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>OCR Placa Mejorado para iPhone</title>
+  <title>Captura OCR desde cámara en vivo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    input, button { width: 100%; padding: 10px; margin-top: 10px; font-size: 1rem; }
-    #estadoOCR { margin-top: 1rem; font-weight: bold; }
-    img { max-width: 100%; margin-top: 1rem; border: 1px solid #ccc; }
-    canvas { display: none; }
+    body { font-family: sans-serif; padding: 1rem; background: #111; color: #fff; text-align: center; }
+    video, canvas { width: 100%; max-width: 480px; border: 2px solid #ccc; border-radius: 10px; }
+    #guia {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 250px;
+      height: 80px;
+      transform: translate(-50%, -50%);
+      border: 2px dashed red;
+      box-sizing: border-box;
+      pointer-events: none;
+    }
+    #contenedorCamara {
+      position: relative;
+      display: inline-block;
+    }
+    #estadoOCR { margin: 1rem 0; font-weight: bold; }
+    button {
+      padding: 10px 20px;
+      font-size: 1rem;
+      margin-top: 1rem;
+      border-radius: 8px;
+      border: none;
+      background-color: #00c853;
+      color: white;
+    }
   </style>
 </head>
 <body>
 
-  <h2>Captura de Placa</h2>
-  <input type="file" id="fotoPlaca" accept="image/*" capture="environment">
-  <img id="preview" alt="Previsualización de imagen">
-  <p id="estadoOCR">Esperando imagen...</p>
-  <input type="text" id="resultadoPlaca" placeholder="Placa detectada...">
-  <canvas id="canvas"></canvas>
+  <h2>Captura de Placa (Cámara en Vivo)</h2>
 
+  <div id="contenedorCamara">
+    <video id="video" autoplay muted playsinline></video>
+    <div id="guia"></div>
+  </div>
+
+  <button id="btnCapturar">📸 Capturar</button>
+
+  <p id="estadoOCR">Esperando captura...</p>
+  <input type="text" id="resultadoPlaca" placeholder="Placa detectada..." />
+
+  <canvas id="canvas" style="display:none;"></canvas>
   <script>
-    const inputFoto = document.getElementById('fotoPlaca');
-    const inputPlaca = document.getElementById('resultadoPlaca');
-    const estadoOCR = document.getElementById('estadoOCR');
-    const preview = document.getElementById('preview');
+    const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
+    const estadoOCR = document.getElementById('estadoOCR');
+    const inputPlaca = document.getElementById('resultadoPlaca');
+    const btnCapturar = document.getElementById('btnCapturar');
     const ctx = canvas.getContext('2d');
-
-    const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500'; // Token real
-
-    inputFoto.addEventListener('change', async (e) => {
-      const archivo = e.target.files[0];
-      if (!archivo) return;
-
-      const img = new Image();
-      img.onload = async () => {
-        // Redimensionar a máx 1280px de ancho
-        const MAX_WIDTH = 1280;
-        const scaleFactor = Math.min(1, MAX_WIDTH / img.width);
-        canvas.width = img.width * scaleFactor;
-        canvas.height = img.height * scaleFactor;
-
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        // Convertir a Blob JPEG
-        canvas.toBlob(async (blob) => {
-          preview.src = canvas.toDataURL('image/jpeg'); // Mostrar preview
-          estadoOCR.textContent = 'Procesando imagen...';
-
-          const formData = new FormData();
-          formData.append('upload', blob, 'placa.jpg');
-          formData.append('regions', 'mx');
-          formData.append('detection_detail', 'true');
-          formData.append('camera_id', 'iphone');
-          formData.append('config', JSON.stringify({
-            blur: true,
-            vehicle_detection: true,
-            multiple_plates: true,
-            country: 'mx',
-            detect_region: true
-          }));
-
-          try {
-            const res = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
-              method: 'POST',
-              headers: {
-                Authorization: `Token ${API_TOKEN}`
-              },
-              body: formData
-            });
-
-            const data = await res.json();
-            console.log('Respuesta completa:', data);
-
+  
+    const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500';
+  
+    // === 1. Activar cámara ===
+    async function iniciarCamara() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (err) {
+        console.error('No se pudo acceder a la cámara:', err);
+        estadoOCR.textContent = 'Error al acceder a la cámara ❌';
+      }
+    }
+  
+    iniciarCamara();
+  
+    // === 2. Capturar imagen al hacer clic ===
+    btnCapturar.addEventListener('click', async () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  
+      estadoOCR.textContent = 'Procesando imagen...';
+  
+      canvas.toBlob(async (blob) => {
+        const formData = new FormData();
+        formData.append('upload', blob, 'captura.jpg');
+        formData.append('regions', 'mx');
+        formData.append('detection_detail', 'true');
+        formData.append('camera_id', 'camara-viva');
+        formData.append('config', JSON.stringify({
+          blur: true,
+          vehicle_detection: true,
+          multiple_plates: false,
+          country: 'mx',
+          detect_region: true
+        }));
+  
+        try {
+          const res = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
+            method: 'POST',
+            headers: {
+              Authorization: `Token ${API_TOKEN}`
+            },
+            body: formData
+          });
+  
+          const data = await res.json();
+          console.log('Respuesta completa:', data);
+  
           const resultado = data.results?.[0];
-
+  
           if (resultado) {
-          const placa = resultado.plate.toUpperCase();
-           inputPlaca.value = placa;
-
-          const confianza = resultado.score;
-          console.log('Confianza:', confianza);
-          console.log('Box:', resultado.box);
-
-           if (confianza < 0.85) {
-           estadoOCR.textContent = `Duda en lectura ⚠️ (${placa})`;
+            const placa = resultado.plate.toUpperCase();
+            inputPlaca.value = placa;
+  
+            const score = resultado.score;
+            if (score < 0.85) {
+              estadoOCR.textContent = `Duda en lectura ⚠️ (${placa})`;
+            } else {
+              estadoOCR.textContent = 'Placa detectada ✅';
+            }
+  
           } else {
-           estadoOCR.textContent = 'Placa detectada ✅';
+            estadoOCR.textContent = 'No se detectó placa ❌';
+            inputPlaca.value = '';
           }
-
-} else {
-  estadoOCR.textContent = 'No se detectó placa ❌';
-  inputPlaca.value = '';
-}
-
-
-          } catch (err) {
-            console.error('Error en OCR:', err);
-            estadoOCR.textContent = 'Error al procesar imagen ❌';
-          }
-        }, 'image/jpeg', 0.92); // Calidad JPEG
-
-      };
-
-      // Leer imagen como base64 para cargarla en <img> y canvas
-      const lector = new FileReader();
-      lector.onload = () => {
-        img.src = lector.result;
-      };
-      lector.readAsDataURL(archivo);
+  
+        } catch (err) {
+          console.error('Error al enviar a Plate Recognizer:', err);
+          estadoOCR.textContent = 'Error al procesar imagen ❌';
+        }
+  
+      }, 'image/jpeg', 0.9);
     });
   </script>
-
+  
 </body>
 </html>
