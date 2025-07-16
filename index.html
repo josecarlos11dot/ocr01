@@ -1,60 +1,67 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <title>Prototipo OCR Placas</title>
+  <meta charset="UTF-8">
+  <title>OCR Placa API</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { font-family: sans-serif; padding: 1rem; }
-    img, canvas { max-width: 100%; margin-top: 1rem; }
-    input { width: 100%; padding: 8px; font-size: 1rem; margin-top: 1rem; }
+    input, button { width: 100%; padding: 10px; margin-top: 10px; font-size: 1rem; }
     #estadoOCR { margin-top: 1rem; font-weight: bold; }
+    img { max-width: 100%; margin-top: 1rem; border: 1px solid #ccc; }
   </style>
 </head>
 <body>
+
   <h2>Captura de Placa</h2>
-
-  <input type="file" accept="image/*" capture="environment" id="fotoPlaca" />
-  <img id="preview" alt="Previsualización" />
-  <canvas id="canvas" style="display:none;"></canvas>
-
+  <input type="file" id="fotoPlaca" accept="image/*" capture="environment">
+  <img id="preview" alt="Previsualización de imagen">
   <p id="estadoOCR">Esperando imagen...</p>
-  <input type="text" id="resultadoPlaca" placeholder="Placa detectada..." />
+  <input type="text" id="resultadoPlaca" placeholder="Placa detectada...">
 
   <script>
     const inputFoto = document.getElementById('fotoPlaca');
-    const imgPreview = document.getElementById('preview');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
     const inputPlaca = document.getElementById('resultadoPlaca');
     const estadoOCR = document.getElementById('estadoOCR');
-  
-    inputFoto.addEventListener('change', (e) => {
+    const preview = document.getElementById('preview');
+
+    const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500'; // Tu token real
+
+    inputFoto.addEventListener('change', async (e) => {
       const archivo = e.target.files[0];
       if (!archivo) return;
-  
-      const url = URL.createObjectURL(archivo);
-      imgPreview.src = url;
-  
-      imgPreview.onload = () => {
-        estadoOCR.textContent = 'Procesando OCR...';
-  
-        canvas.width = imgPreview.naturalWidth;
-        canvas.height = imgPreview.naturalHeight;
-        ctx.drawImage(imgPreview, 0, 0);
-  
-        Tesseract.recognize(canvas, 'eng', {
-          logger: m => console.log(m)
-        }).then(({ data: { text } }) => {
-          const placaDetectada = text.toUpperCase().match(/[A-Z]{3}[-\s]?\d{3}[-\s]?[A-Z0-9]/);
-          inputPlaca.value = placaDetectada ? placaDetectada[0].replace(/[-\s]/g, '') : '';
-          estadoOCR.textContent = placaDetectada ? 'Placa detectada ✅' : 'No se detectó placa ❌';
-        }).catch(err => {
-          console.error(err);
-          estadoOCR.textContent = 'Error al procesar imagen ❌';
+
+      const urlPreview = URL.createObjectURL(archivo);
+      preview.src = urlPreview;
+
+      estadoOCR.textContent = 'Enviando imagen a Plate Recognizer...';
+
+      const formData = new FormData();
+      formData.append('upload', archivo);
+      formData.append('regions', 'mx');
+
+      try {
+        const res = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
+          method: 'POST',
+          headers: {
+            Authorization: `Token ${API_TOKEN}`
+          },
+          body: formData
         });
-      };
+
+        const data = await res.json();
+        console.log('Respuesta completa:', data);
+
+        const placa = data.results?.[0]?.plate?.toUpperCase() || '';
+        inputPlaca.value = placa;
+        estadoOCR.textContent = placa ? 'Placa detectada ✅' : 'No se detectó placa ❌';
+
+      } catch (err) {
+        console.error('Error en OCR:', err);
+        estadoOCR.textContent = 'Error al procesar imagen ❌';
+      }
     });
   </script>
-  
+
 </body>
 </html>
