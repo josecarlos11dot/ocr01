@@ -48,39 +48,8 @@
   <p id="estadoOCR">Esperando captura...</p>
   <input type="text" id="resultadoPlaca" placeholder="Placa detectada..." />
 
- <!-- Campos normales -->
-<input type="text" id="inputMarca" placeholder="Marca" />
-<input type="text" id="inputModelo" placeholder="Modelo" />
-<input type="text" id="inputColor" placeholder="Color" />
-
-<!-- Ventana emergente si la placa no está en base -->
-<div id="ventanaRegistro" style="display:none; background:#222; padding:1rem; margin-top:2rem; border-radius:10px; color:#fff;">
-  <h3>Registrar nuevo vehículo</h3>
-
-  <label>Placa detectada:</label>
-  <input id="nuevaPlaca" readonly />
-
-  <label>Marca:</label>
-  <input id="nuevaMarca" placeholder="Marca" />
-
-  <label>Modelo:</label>
-  <input id="nuevaModelo" placeholder="Modelo" />
-
-  <label>Color:</label>
-  <input id="nuevaColor" placeholder="Color" />
-
-  <br><br>
-  <button onclick="document.getElementById('ventanaRegistro').style.display='none'">Cancelar</button>
-</div>
-
   <canvas id="canvas" style="display:none;"></canvas>
   <script>
-    const baseDePlacas = [
-      { placa: "GMA129F", marca: "NISSAN", modelo: "SENTRA", color: "ROJO" },
-      { placa: "gxh278f", marca: "mazda", modelo: "3", color: "Verde" },
-      { placa: "bdc285a", marca: "bmw", modelo: "325", color: "Gris" }
-    ];
-  
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const estadoOCR = document.getElementById('estadoOCR');
@@ -90,6 +59,7 @@
   
     const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500';
   
+    // === 1. Activar cámara ===
     async function iniciarCamara() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -105,6 +75,7 @@
   
     iniciarCamara();
   
+    // === 2. Capturar imagen al hacer clic ===
     btnCapturar.addEventListener('click', async () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -129,7 +100,9 @@
         try {
           const res = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
             method: 'POST',
-            headers: { Authorization: `Token ${API_TOKEN}` },
+            headers: {
+              Authorization: `Token ${API_TOKEN}`
+            },
             body: formData
           });
   
@@ -143,29 +116,10 @@
             inputPlaca.value = placa;
   
             const score = resultado.score;
-            estadoOCR.textContent = score < 0.85
-              ? `Duda en lectura ⚠️ (${placa})`
-              : 'Placa detectada ✅';
-  
-            // Asociación automática
-            const placaNormalizada = placa.toLowerCase().trim();
-            const encontrado = baseDePlacas.find(auto => auto.placa === placaNormalizada);
-  
-            if (encontrado) {
-              document.getElementById('inputMarca').value = encontrado.marca;
-              document.getElementById('inputModelo').value = encontrado.modelo;
-              document.getElementById('inputColor').value = encontrado.color;
-              estadoOCR.textContent += ' - Datos cargados ✅';
+            if (score < 0.85) {
+              estadoOCR.textContent = `Duda en lectura ⚠️ (${placa})`;
             } else {
-              estadoOCR.textContent += ' - No encontrada, abre registro ✍️';
-  
-              const ventana = document.getElementById('ventanaRegistro');
-              const campoNuevaPlaca = document.getElementById('nuevaPlaca');
-  
-              if (ventana && campoNuevaPlaca) {
-                campoNuevaPlaca.value = placa;
-                ventana.style.display = 'block';
-              }
+              estadoOCR.textContent = 'Placa detectada ✅';
             }
   
           } else {
@@ -181,8 +135,6 @@
       }, 'image/jpeg', 0.9);
     });
   </script>
-  
-  
   
 </body>
 </html>
