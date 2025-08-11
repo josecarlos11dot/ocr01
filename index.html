@@ -31,6 +31,16 @@
       border: none;
       background-color: #00c853;
       color: white;
+      cursor: pointer;
+    }
+    input[type="text"] {
+      width: 100%;
+      max-width: 320px;
+      padding: .6rem .8rem;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background: #000;
+      color: #fff;
     }
   </style>
 </head>
@@ -49,6 +59,7 @@
   <input type="text" id="resultadoPlaca" placeholder="Placa detectada..." />
 
   <canvas id="canvas" style="display:none;"></canvas>
+
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
@@ -56,9 +67,46 @@
     const inputPlaca = document.getElementById('resultadoPlaca');
     const btnCapturar = document.getElementById('btnCapturar');
     const ctx = canvas.getContext('2d');
-  
+
+    // ⚠️ Nota: este token está en el front. Más adelante conviene pasarlo a un backend.
     const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500';
-  
+
+    // (opcional) genera tarjetas locales con botón "Registrar"
+    function agregarPlacaPendiente(placaDetectada) {
+      let contenedor = document.getElementById('pendientesRegistro');
+
+      if (!contenedor) {
+        contenedor = document.createElement('div');
+        contenedor.id = "pendientesRegistro";
+        contenedor.innerHTML = `<h3 style="margin-top:2rem">🚗 Pendientes por registrar</h3>`;
+        document.body.appendChild(contenedor);
+      }
+
+      const tarjeta = document.createElement('div');
+      tarjeta.style.border = '1px solid #ccc';
+      tarjeta.style.padding = '1rem';
+      tarjeta.style.margin = '1rem auto';
+      tarjeta.style.maxWidth = '400px';
+      tarjeta.style.borderRadius = '10px';
+      tarjeta.style.backgroundColor = '#222';
+      tarjeta.innerHTML = `
+        <strong>${placaDetectada}</strong><br>
+        <small>${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small><br>
+        <button onclick="enviarPlacaAlSistema('${placaDetectada}')" style="margin-top:10px;">Registrar</button>
+      `;
+
+      contenedor.appendChild(tarjeta);
+    }
+
+    // ✅ CAMBIO 1: redirigir a tu sistema en Vercel con ?placa=...
+    function enviarPlacaAlSistema(placa) {
+      const SISTEMA_URL = 'https://sistema-frontend-seven.vercel.app/';
+      const p = (placa || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!p) return;
+      try { localStorage.setItem('placaDetectadaOCR', p); } catch {}
+      window.location.href = `${SISTEMA_URL}?placa=${encodeURIComponent(p)}`;
+    }
+
     // === 1. Activar cámara ===
     async function iniciarCamara() {
       try {
@@ -72,17 +120,16 @@
         estadoOCR.textContent = 'Error al acceder a la cámara ❌';
       }
     }
-  
     iniciarCamara();
-  
+
     // === 2. Capturar imagen al hacer clic ===
     btnCapturar.addEventListener('click', async () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 360;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  
+
       estadoOCR.textContent = 'Procesando imagen...';
-  
+
       canvas.toBlob(async (blob) => {
         const formData = new FormData();
         formData.append('upload', blob, 'captura.jpg');
@@ -96,7 +143,7 @@
           country: 'mx',
           detect_region: true
         }));
-  
+
         try {
           const res = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
             method: 'POST',
@@ -105,36 +152,40 @@
             },
             body: formData
           });
-  
+
           const data = await res.json();
           console.log('Respuesta completa:', data);
-  
+
           const resultado = data.results?.[0];
-  
+
           if (resultado) {
-            const placa = resultado.plate.toUpperCase();
+            // ✅ CAMBIO 2: normalizar, mostrar y redirigir si el score es bueno
+            const placa = (resultado.plate || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
             inputPlaca.value = placa;
-  
-            const score = resultado.score;
+
+            const score = Number(resultado.score || 0);
             if (score < 0.85) {
               estadoOCR.textContent = `Duda en lectura ⚠️ (${placa})`;
+              // (opcional) agregar a tarjetas locales:
+              // agregarPlacaPendiente(placa);
             } else {
               estadoOCR.textContent = 'Placa detectada ✅';
+              enviarPlacaAlSistema(placa); // ← redirige a tu sistema con ?placa=
             }
-  
+
           } else {
             estadoOCR.textContent = 'No se detectó placa ❌';
             inputPlaca.value = '';
           }
-  
+
         } catch (err) {
           console.error('Error al enviar a Plate Recognizer:', err);
           estadoOCR.textContent = 'Error al procesar imagen ❌';
         }
-  
+
       }, 'image/jpeg', 0.9);
     });
   </script>
-  
+
 </body>
 </html>
