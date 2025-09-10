@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Captura OCR - Híbrido PR + Tesseract</title>
+  <title>Captura OCR - Híbrido PR + Google Vision</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { font-family: sans-serif; padding: 1rem; background: #111; color: #fff; text-align: center; }
@@ -24,42 +24,65 @@
     }
     .api-status {
       display: flex; justify-content: center; gap: 1rem; margin: 1rem 0; font-size: 0.9em;
+      flex-wrap: wrap;
     }
     .api-counter { 
       padding: 0.5rem 1rem; border-radius: 20px; background: #333; 
     }
     .api-counter.pr { border: 2px solid #ff9800; }
-    .api-counter.tesseract { border: 2px solid #4caf50; }
-    .toggle-container {
-      margin: 1rem 0; display: flex; justify-content: center; align-items: center; gap: 1rem;
-    }
+    .api-counter.google { border: 2px solid #4285f4; }
     .method-selector {
-      display: flex; gap: 0.5rem; margin: 1rem 0;
+      display: flex; gap: 0.5rem; margin: 1rem 0; justify-content: center;
+      flex-wrap: wrap;
     }
     .method-btn {
       padding: 0.5rem 1rem; border-radius: 20px; border: 2px solid #444; 
       background: #222; color: #fff; cursor: pointer; font-size: 0.9em;
     }
     .method-btn.active { border-color: #00c853; background: #00c853; }
+    .config-section {
+      margin: 1rem 0; padding: 1rem; background: #222; border-radius: 10px;
+    }
+    .config-input {
+      width: 100%; max-width: 400px; padding: 0.5rem; margin: 0.5rem 0;
+      border-radius: 5px; border: 1px solid #444; background: #333; color: #fff;
+    }
+    .config-toggle { cursor: pointer; color: #4caf50; }
   </style>
 </head>
 <body>
 
-  <h2>OCR Híbrido - Smart Switching</h2>
+  <h2>OCR Híbrido - PR + Google Vision</h2>
 
   <div class="api-status">
     <div class="api-counter pr">
       <strong>Plate Recognizer:</strong> <span id="prCount">50</span> restantes
     </div>
-    <div class="api-counter tesseract">
-      <strong>Tesseract:</strong> Ilimitado ♾️
+    <div class="api-counter google">
+      <strong>Google Vision:</strong> <span id="googleCount">1000</span> restantes/mes
     </div>
   </div>
 
   <div class="method-selector">
     <button id="methodAuto" class="method-btn active">🤖 Auto</button>
     <button id="methodPR" class="method-btn">🚀 Plate Recognizer</button>
-    <button id="methodTess" class="method-btn">🔧 Tesseract</button>
+    <button id="methodGoogle" class="method-btn">🔍 Google Vision</button>
+  </div>
+
+  <!-- Configuración Google API -->
+  <div class="config-section">
+    <div class="config-toggle" onclick="toggleConfig()">⚙️ Configurar Google Vision API</div>
+    <div id="configSection" style="display:none; margin-top: 1rem;">
+      <input type="text" id="googleApiKey" class="config-input" 
+             placeholder="Tu Google Vision API Key..." 
+             value="">
+      <br>
+      <small style="color: #ccc;">
+        📋 <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color: #4285f4;">
+          Obtener API Key gratuita (1000 usos/mes)
+        </a>
+      </small>
+    </div>
   </div>
 
   <div id="contenedorCamara">
@@ -79,9 +102,6 @@
 
   <canvas id="canvas" style="display:none;"></canvas>
 
-  <!-- Tesseract.js CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
-
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
@@ -91,29 +111,53 @@
     const btnCapturar = document.getElementById('btnCapturar');
     const btnConfirmar = document.getElementById('btnConfirmar');
     const prCount = document.getElementById('prCount');
+    const googleCount = document.getElementById('googleCount');
+    const googleApiKey = document.getElementById('googleApiKey');
     const ctx = canvas.getContext('2d');
 
     // APIs Configuration
-    const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500'; // Tu token actual
+    const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500';
 
     // Estado del sistema
     let imagenOCRCapturada = "";
     let prUsageCount = parseInt(localStorage.getItem('prUsageCount') || '0');
-    let selectedMethod = 'auto'; // 'auto', 'pr', 'tesseract'
+    let googleUsageCount = parseInt(localStorage.getItem('googleUsageCount') || '0');
+    let selectedMethod = 'auto';
 
     // UI Elements
     const methodBtns = {
       auto: document.getElementById('methodAuto'),
       pr: document.getElementById('methodPR'),
-      tesseract: document.getElementById('methodTess')
+      google: document.getElementById('methodGoogle')
     };
 
-    // Actualizar contador
-    function updatePRCount() {
-      const remaining = Math.max(0, 50 - prUsageCount);
-      prCount.textContent = remaining;
-      if (remaining <= 5) {
+    // Configuración
+    function toggleConfig() {
+      const section = document.getElementById('configSection');
+      section.style.display = section.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // Cargar API key guardada
+    googleApiKey.value = localStorage.getItem('googleVisionApiKey') || '';
+    
+    // Guardar API key cuando cambie
+    googleApiKey.addEventListener('input', () => {
+      localStorage.setItem('googleVisionApiKey', googleApiKey.value.trim());
+    });
+
+    // Actualizar contadores
+    function updateCounts() {
+      const prRemaining = Math.max(0, 50 - prUsageCount);
+      const googleRemaining = Math.max(0, 1000 - googleUsageCount);
+      
+      prCount.textContent = prRemaining;
+      googleCount.textContent = googleRemaining;
+      
+      if (prRemaining <= 5) {
         prCount.parentElement.style.borderColor = '#f44336';
+      }
+      if (googleRemaining <= 100) {
+        googleCount.parentElement.style.borderColor = '#f44336';
       }
     }
 
@@ -126,15 +170,15 @@
         
         let statusText = '';
         switch(method) {
-          case 'auto': statusText = 'Modo automático: PR si quedan usos, sino Tesseract'; break;
+          case 'auto': statusText = 'Modo automático: PR primero, Google Vision de respaldo'; break;
           case 'pr': statusText = 'Forzando Plate Recognizer'; break;
-          case 'tesseract': statusText = 'Forzando Tesseract (offline)'; break;
+          case 'google': statusText = 'Forzando Google Vision API'; break;
         }
         estadoOCR.textContent = statusText;
       });
     });
 
-    // ==== Cámara (tu código original) ====
+    // ==== Cámara ====
     async function iniciarCamara() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -145,7 +189,7 @@
         video.addEventListener('loadedmetadata', () => {
           if (video.videoWidth && video.videoHeight) {
             btnCapturar.disabled = false;
-            estadoOCR.textContent = 'Cámara activa. Modo automático activado.';
+            estadoOCR.textContent = 'Cámara activa. Modo automático: PR + Google Vision.';
           }
         });
       } catch (err) {
@@ -154,7 +198,7 @@
       }
     }
 
-    // Utilidades (tu código)
+    // Utilidades
     const normalizar = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
     function snapshotDeVideo(videoEl) {
@@ -176,7 +220,7 @@
       return '';
     }
 
-    // OCR con Plate Recognizer (tu código original)
+    // OCR con Plate Recognizer
     async function reconocerConPlateRecognizer(blob) {
       const formData = new FormData();
       formData.append('upload', blob, 'captura.jpg');
@@ -200,7 +244,7 @@
       // Actualizar contador de uso
       prUsageCount++;
       localStorage.setItem('prUsageCount', prUsageCount.toString());
-      updatePRCount();
+      updateCounts();
 
       const resultado = data.results?.[0];
       if (resultado) {
@@ -212,50 +256,93 @@
       return { placa: '', score: 0, method: 'Plate Recognizer' };
     }
 
-    // OCR con Tesseract
-    async function reconocerConTesseract(canvas) {
-      const { data: { text, confidence } } = await Tesseract.recognize(
-        canvas, 'eng',
-        {
-          logger: m => {
-            if (m.status === 'recognizing text') {
-              estadoOCR.textContent = `Tesseract procesando... ${Math.round(m.progress * 100)}%`;
+    // OCR con Google Vision
+    async function reconocerConGoogleVision(canvas) {
+      const apiKey = googleApiKey.value.trim();
+      if (!apiKey) {
+        throw new Error('Google Vision API Key no configurada. Ve a ⚙️ Configurar.');
+      }
+
+      const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+      
+      const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: [{
+            image: { content: base64 },
+            features: [{ type: 'TEXT_DETECTION', maxResults: 10 }]
+          }]
+        })
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data?.error?.message || 'Error en Google Vision API');
+      }
+
+      // Actualizar contador de uso
+      googleUsageCount++;
+      localStorage.setItem('googleUsageCount', googleUsageCount.toString());
+      updateCounts();
+
+      if (data.responses?.[0]?.textAnnotations) {
+        const fullText = data.responses[0].textAnnotations[0].description;
+        console.log('Texto detectado:', fullText);
+        
+        // Buscar patrones de placa mexicana (6-8 caracteres alfanuméricos)
+        const placaPatterns = [
+          /[A-Z]{3}[0-9]{4}/g,  // ABC1234
+          /[A-Z]{3}[0-9]{3}/g,   // ABC123
+          /[0-9]{3}[A-Z]{3}/g,   // 123ABC
+          /[A-Z0-9]{6,8}/g       // General
+        ];
+        
+        for (let pattern of placaPatterns) {
+          const matches = fullText.match(pattern) || [];
+          if (matches.length > 0) {
+            const placa = normalizar(matches[0]);
+            if (placa.length >= 6 && placa.length <= 8) {
+              return { placa, score: 0.85, method: 'Google Vision' };
             }
           }
         }
-      );
-
-      // Buscar patrones de placa mexicana
-      const placaPattern = /[A-Z0-9]{6,8}/g;
-      const matches = text.match(placaPattern) || [];
-      
-      if (matches.length > 0) {
-        const placa = normalizar(matches[0]);
-        return { placa, score: confidence / 100, method: 'Tesseract' };
       }
 
-      return { placa: '', score: 0, method: 'Tesseract' };
+      return { placa: '', score: 0, method: 'Google Vision' };
     }
 
     // Lógica de decisión automática
     function shouldUsePlateRecognizer() {
-      const remaining = Math.max(0, 50 - prUsageCount);
+      const prRemaining = Math.max(0, 50 - prUsageCount);
       
       switch(selectedMethod) {
-        case 'pr': return remaining > 0;
-        case 'tesseract': return false;
-        case 'auto': return remaining > 10; // Reservar los últimos 10 para casos especiales
+        case 'pr': return prRemaining > 0;
+        case 'google': return false;
+        case 'auto': return prRemaining > 5; // Reservar los últimos 5 para emergencias
         default: return false;
       }
     }
 
-    // ==== Capturar y reconocer (lógica híbrida) ====
+    function shouldUseGoogleVision() {
+      const googleRemaining = Math.max(0, 1000 - googleUsageCount);
+      const hasApiKey = googleApiKey.value.trim().length > 0;
+      
+      switch(selectedMethod) {
+        case 'pr': return false;
+        case 'google': return hasApiKey && googleRemaining > 0;
+        case 'auto': return hasApiKey && googleRemaining > 0;
+        default: return false;
+      }
+    }
+
+    // ==== Capturar y reconocer ====
     btnCapturar.addEventListener('click', async () => {
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 360;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      // Guardar imagen
       imagenOCRCapturada = canvas.toDataURL('image/jpeg', 0.8);
 
       try {
@@ -268,21 +355,27 @@
               resultado = await reconocerConPlateRecognizer(blob);
               procesarResultado(resultado);
             } catch (err) {
-              console.error('PR falló, usando Tesseract:', err);
-              estadoOCR.textContent = 'PR falló, usando Tesseract como backup...';
-              resultado = await reconocerConTesseract(canvas);
-              procesarResultado(resultado);
+              console.error('PR falló, probando Google Vision:', err);
+              if (shouldUseGoogleVision()) {
+                estadoOCR.textContent = 'PR falló, usando Google Vision...';
+                resultado = await reconocerConGoogleVision(canvas);
+                procesarResultado(resultado);
+              } else {
+                estadoOCR.textContent = 'Error: Configura Google Vision como respaldo ❌';
+              }
             }
           }, 'image/jpeg', 0.9);
-        } else {
-          estadoOCR.textContent = 'Procesando con Tesseract...';
-          resultado = await reconocerConTesseract(canvas);
+        } else if (shouldUseGoogleVision()) {
+          estadoOCR.textContent = 'Procesando con Google Vision...';
+          resultado = await reconocerConGoogleVision(canvas);
           procesarResultado(resultado);
+        } else {
+          estadoOCR.textContent = 'Sin métodos disponibles. Configura Google Vision API ❌';
         }
 
       } catch (err) {
         console.error('Error en OCR:', err);
-        estadoOCR.textContent = 'Error al procesar imagen ❌';
+        estadoOCR.textContent = 'Error: ' + err.message;
       }
     });
 
@@ -290,7 +383,7 @@
       if (resultado.placa) {
         inputPlaca.value = resultado.placa;
         
-        const methodLabel = resultado.method === 'Plate Recognizer' ? '🚀' : '🔧';
+        const methodLabel = resultado.method === 'Plate Recognizer' ? '🚀' : '🔍';
         
         if (resultado.score < 0.8) {
           estadoOCR.textContent = `${methodLabel} Duda en lectura ⚠️ (${resultado.placa}). Corrige y CONFIRMA.`;
@@ -303,7 +396,7 @@
       }
     }
 
-    // ==== Resto de tu código (confirmar, etc.) sin cambios ====
+    // ==== Confirmar y enviar ====
     let enviando = false;
     let _ultima = { placa:'', t:0 };
 
@@ -373,7 +466,7 @@
     });
 
     // Inicializar
-    updatePRCount();
+    updateCounts();
     iniciarCamara();
   </script>
 </body>
