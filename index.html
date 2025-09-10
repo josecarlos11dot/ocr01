@@ -2,190 +2,379 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Captura OCR desde cámara en vivo</title>
+  <title>Captura OCR - Híbrido PR + Tesseract</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     body { font-family: sans-serif; padding: 1rem; background: #111; color: #fff; text-align: center; }
     video, canvas { width: 100%; max-width: 480px; border: 2px solid #ccc; border-radius: 10px; }
     #guia {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 250px;
-      height: 80px;
-      transform: translate(-50%, -50%);
-      border: 2px dashed red;
-      box-sizing: border-box;
-      pointer-events: none;
+      position: absolute; top: 50%; left: 50%; width: 250px; height: 80px;
+      transform: translate(-50%, -50%); border: 2px dashed red; box-sizing: border-box; pointer-events: none;
     }
-    #contenedorCamara {
-      position: relative;
-      display: inline-block;
-    }
-    #estadoOCR { margin: 1rem 0; font-weight: bold; }
+    #contenedorCamara { position: relative; display: inline-block; }
+    #estadoOCR, #estadoSend { margin: 1rem 0; font-weight: bold; }
     button {
-      padding: 10px 20px;
-      font-size: 1rem;
-      margin-top: 1rem;
-      border-radius: 8px;
-      border: none;
-      background-color: #00c853;
-      color: white;
-      cursor: pointer;
+      padding: 10px 20px; font-size: 1rem; margin-top: 1rem;
+      border-radius: 8px; border: none; background-color: #00c853; color: white; cursor: pointer;
     }
+    button:disabled { opacity: .6; cursor: not-allowed; }
     input[type="text"] {
-      width: 100%;
-      max-width: 320px;
-      padding: .6rem .8rem;
-      border-radius: 8px;
-      border: 1px solid #444;
-      background: #000;
-      color: #fff;
+      width: 100%; max-width: 320px; padding: .6rem .8rem;
+      border-radius: 8px; border: 1px solid #444; background: #000; color: #fff;
     }
+    .api-status {
+      display: flex; justify-content: center; gap: 1rem; margin: 1rem 0; font-size: 0.9em;
+    }
+    .api-counter { 
+      padding: 0.5rem 1rem; border-radius: 20px; background: #333; 
+    }
+    .api-counter.pr { border: 2px solid #ff9800; }
+    .api-counter.tesseract { border: 2px solid #4caf50; }
+    .toggle-container {
+      margin: 1rem 0; display: flex; justify-content: center; align-items: center; gap: 1rem;
+    }
+    .method-selector {
+      display: flex; gap: 0.5rem; margin: 1rem 0;
+    }
+    .method-btn {
+      padding: 0.5rem 1rem; border-radius: 20px; border: 2px solid #444; 
+      background: #222; color: #fff; cursor: pointer; font-size: 0.9em;
+    }
+    .method-btn.active { border-color: #00c853; background: #00c853; }
   </style>
 </head>
 <body>
 
-  <h2>Captura de Placa (Cámara en Vivo)</h2>
+  <h2>OCR Híbrido - Smart Switching</h2>
+
+  <div class="api-status">
+    <div class="api-counter pr">
+      <strong>Plate Recognizer:</strong> <span id="prCount">50</span> restantes
+    </div>
+    <div class="api-counter tesseract">
+      <strong>Tesseract:</strong> Ilimitado ♾️
+    </div>
+  </div>
+
+  <div class="method-selector">
+    <button id="methodAuto" class="method-btn active">🤖 Auto</button>
+    <button id="methodPR" class="method-btn">🚀 Plate Recognizer</button>
+    <button id="methodTess" class="method-btn">🔧 Tesseract</button>
+  </div>
 
   <div id="contenedorCamara">
     <video id="video" autoplay muted playsinline></video>
     <div id="guia"></div>
   </div>
 
-  <button id="btnCapturar">📸 Capturar</button>
+  <button id="btnCapturar" disabled>📸 Capturar</button>
 
-  <p id="estadoOCR">Esperando captura...</p>
+  <p id="estadoOCR">Cargando cámara...</p>
   <input type="text" id="resultadoPlaca" placeholder="Placa detectada..." />
 
+  <div>
+    <button id="btnConfirmar">✅ Confirmar y enviar</button>
+  </div>
+  <p id="estadoSend">Esperando confirmación...</p>
+
   <canvas id="canvas" style="display:none;"></canvas>
+
+  <!-- Tesseract.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
 
   <script>
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
     const estadoOCR = document.getElementById('estadoOCR');
+    const estadoSend = document.getElementById('estadoSend');
     const inputPlaca = document.getElementById('resultadoPlaca');
     const btnCapturar = document.getElementById('btnCapturar');
+    const btnConfirmar = document.getElementById('btnConfirmar');
+    const prCount = document.getElementById('prCount');
     const ctx = canvas.getContext('2d');
 
-    // ⚠️ Nota: este token está en el front. Más adelante conviene pasarlo a un backend.
-    const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500';
+    // APIs Configuration
+    const API_TOKEN = '3f8ef072e79205794e226ac4c63907d1b081c500'; // Tu token actual
 
-    // (opcional) genera tarjetas locales con botón "Registrar"
-    function agregarPlacaPendiente(placaDetectada) {
-      let contenedor = document.getElementById('pendientesRegistro');
+    // Estado del sistema
+    let imagenOCRCapturada = "";
+    let prUsageCount = parseInt(localStorage.getItem('prUsageCount') || '0');
+    let selectedMethod = 'auto'; // 'auto', 'pr', 'tesseract'
 
-      if (!contenedor) {
-        contenedor = document.createElement('div');
-        contenedor.id = "pendientesRegistro";
-        contenedor.innerHTML = `<h3 style="margin-top:2rem">🚗 Pendientes por registrar</h3>`;
-        document.body.appendChild(contenedor);
+    // UI Elements
+    const methodBtns = {
+      auto: document.getElementById('methodAuto'),
+      pr: document.getElementById('methodPR'),
+      tesseract: document.getElementById('methodTess')
+    };
+
+    // Actualizar contador
+    function updatePRCount() {
+      const remaining = Math.max(0, 50 - prUsageCount);
+      prCount.textContent = remaining;
+      if (remaining <= 5) {
+        prCount.parentElement.style.borderColor = '#f44336';
       }
-
-      const tarjeta = document.createElement('div');
-      tarjeta.style.border = '1px solid #ccc';
-      tarjeta.style.padding = '1rem';
-      tarjeta.style.margin = '1rem auto';
-      tarjeta.style.maxWidth = '400px';
-      tarjeta.style.borderRadius = '10px';
-      tarjeta.style.backgroundColor = '#222';
-      tarjeta.innerHTML = `
-        <strong>${placaDetectada}</strong><br>
-        <small>${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small><br>
-        <button onclick="enviarPlacaAlSistema('${placaDetectada}')" style="margin-top:10px;">Registrar</button>
-      `;
-
-      contenedor.appendChild(tarjeta);
     }
 
-    // ✅ CAMBIO 1: redirigir a tu sistema en Vercel con ?placa=...
-    function enviarPlacaAlSistema(placa) {
-      const SISTEMA_URL = 'https://sistema-frontend-seven.vercel.app/';
-      const p = (placa || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-      if (!p) return;
-      try { localStorage.setItem('placaDetectadaOCR', p); } catch {}
-      window.location.href = `${SISTEMA_URL}?placa=${encodeURIComponent(p)}`;
-    }
+    // Selector de método
+    Object.entries(methodBtns).forEach(([method, btn]) => {
+      btn.addEventListener('click', () => {
+        Object.values(methodBtns).forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedMethod = method;
+        
+        let statusText = '';
+        switch(method) {
+          case 'auto': statusText = 'Modo automático: PR si quedan usos, sino Tesseract'; break;
+          case 'pr': statusText = 'Forzando Plate Recognizer'; break;
+          case 'tesseract': statusText = 'Forzando Tesseract (offline)'; break;
+        }
+        estadoOCR.textContent = statusText;
+      });
+    });
 
-    // === 1. Activar cámara ===
+    // ==== Cámara (tu código original) ====
     async function iniciarCamara() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' },
-          audio: false
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: 'environment' }, 
+          audio: false 
         });
         video.srcObject = stream;
+        video.addEventListener('loadedmetadata', () => {
+          if (video.videoWidth && video.videoHeight) {
+            btnCapturar.disabled = false;
+            estadoOCR.textContent = 'Cámara activa. Modo automático activado.';
+          }
+        });
       } catch (err) {
         console.error('No se pudo acceder a la cámara:', err);
         estadoOCR.textContent = 'Error al acceder a la cámara ❌';
       }
     }
-    iniciarCamara();
 
-    // === 2. Capturar imagen al hacer clic ===
+    // Utilidades (tu código)
+    const normalizar = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    function snapshotDeVideo(videoEl) {
+      const c = document.createElement('canvas');
+      const w = videoEl.videoWidth || videoEl.clientWidth || 640;
+      const h = videoEl.videoHeight || videoEl.clientHeight || 480;
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(videoEl, 0, 0, w, h);
+      return c.toDataURL('image/jpeg', 0.8);
+    }
+
+    function imagenActualParaPendiente(videoEl, canvasEl) {
+      try { if (videoEl && videoEl.readyState >= 2) return snapshotDeVideo(videoEl); } catch {}
+      try {
+        if (canvasEl && canvasEl.width && canvasEl.height) {
+          return canvasEl.toDataURL('image/jpeg', 0.8);
+        }
+      } catch {}
+      return '';
+    }
+
+    // OCR con Plate Recognizer (tu código original)
+    async function reconocerConPlateRecognizer(blob) {
+      const formData = new FormData();
+      formData.append('upload', blob, 'captura.jpg');
+      formData.append('regions', 'mx');
+      formData.append('detection_detail', 'true');
+      formData.append('camera_id', 'camara-viva');
+      formData.append('config', JSON.stringify({
+        blur: true, vehicle_detection: true, multiple_plates: false, 
+        country: 'mx', detect_region: true
+      }));
+
+      const res = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
+        method: 'POST', 
+        headers: { Authorization: `Token ${API_TOKEN}` }, 
+        body: formData
+      });
+
+      const data = await res.json();
+      console.log('Respuesta PlateRecognizer:', data);
+
+      // Actualizar contador de uso
+      prUsageCount++;
+      localStorage.setItem('prUsageCount', prUsageCount.toString());
+      updatePRCount();
+
+      const resultado = data.results?.[0];
+      if (resultado) {
+        const placa = normalizar(resultado.plate);
+        const score = Number(resultado.score || 0);
+        return { placa, score, method: 'Plate Recognizer' };
+      }
+
+      return { placa: '', score: 0, method: 'Plate Recognizer' };
+    }
+
+    // OCR con Tesseract
+    async function reconocerConTesseract(canvas) {
+      const { data: { text, confidence } } = await Tesseract.recognize(
+        canvas, 'eng',
+        {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              estadoOCR.textContent = `Tesseract procesando... ${Math.round(m.progress * 100)}%`;
+            }
+          }
+        }
+      );
+
+      // Buscar patrones de placa mexicana
+      const placaPattern = /[A-Z0-9]{6,8}/g;
+      const matches = text.match(placaPattern) || [];
+      
+      if (matches.length > 0) {
+        const placa = normalizar(matches[0]);
+        return { placa, score: confidence / 100, method: 'Tesseract' };
+      }
+
+      return { placa: '', score: 0, method: 'Tesseract' };
+    }
+
+    // Lógica de decisión automática
+    function shouldUsePlateRecognizer() {
+      const remaining = Math.max(0, 50 - prUsageCount);
+      
+      switch(selectedMethod) {
+        case 'pr': return remaining > 0;
+        case 'tesseract': return false;
+        case 'auto': return remaining > 10; // Reservar los últimos 10 para casos especiales
+        default: return false;
+      }
+    }
+
+    // ==== Capturar y reconocer (lógica híbrida) ====
     btnCapturar.addEventListener('click', async () => {
       canvas.width = video.videoWidth || 640;
       canvas.height = video.videoHeight || 360;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      estadoOCR.textContent = 'Procesando imagen...';
+      // Guardar imagen
+      imagenOCRCapturada = canvas.toDataURL('image/jpeg', 0.8);
 
-      canvas.toBlob(async (blob) => {
-        const formData = new FormData();
-        formData.append('upload', blob, 'captura.jpg');
-        formData.append('regions', 'mx');
-        formData.append('detection_detail', 'true');
-        formData.append('camera_id', 'camara-viva');
-        formData.append('config', JSON.stringify({
-          blur: true,
-          vehicle_detection: true,
-          multiple_plates: false,
-          country: 'mx',
-          detect_region: true
-        }));
+      try {
+        let resultado;
 
-        try {
-          const res = await fetch('https://api.platerecognizer.com/v1/plate-reader/', {
-            method: 'POST',
-            headers: {
-              Authorization: `Token ${API_TOKEN}`
-            },
-            body: formData
-          });
-
-          const data = await res.json();
-          console.log('Respuesta completa:', data);
-
-          const resultado = data.results?.[0];
-
-          if (resultado) {
-            // ✅ CAMBIO 2: normalizar, mostrar y redirigir si el score es bueno
-            const placa = (resultado.plate || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-            inputPlaca.value = placa;
-
-            const score = Number(resultado.score || 0);
-            if (score < 0.85) {
-              estadoOCR.textContent = `Duda en lectura ⚠️ (${placa})`;
-              // (opcional) agregar a tarjetas locales:
-              // agregarPlacaPendiente(placa);
-            } else {
-              estadoOCR.textContent = 'Placa detectada ✅';
-              enviarPlacaAlSistema(placa); // ← redirige a tu sistema con ?placa=
+        if (shouldUsePlateRecognizer()) {
+          estadoOCR.textContent = 'Procesando con Plate Recognizer...';
+          canvas.toBlob(async (blob) => {
+            try {
+              resultado = await reconocerConPlateRecognizer(blob);
+              procesarResultado(resultado);
+            } catch (err) {
+              console.error('PR falló, usando Tesseract:', err);
+              estadoOCR.textContent = 'PR falló, usando Tesseract como backup...';
+              resultado = await reconocerConTesseract(canvas);
+              procesarResultado(resultado);
             }
-
-          } else {
-            estadoOCR.textContent = 'No se detectó placa ❌';
-            inputPlaca.value = '';
-          }
-
-        } catch (err) {
-          console.error('Error al enviar a Plate Recognizer:', err);
-          estadoOCR.textContent = 'Error al procesar imagen ❌';
+          }, 'image/jpeg', 0.9);
+        } else {
+          estadoOCR.textContent = 'Procesando con Tesseract...';
+          resultado = await reconocerConTesseract(canvas);
+          procesarResultado(resultado);
         }
 
-      }, 'image/jpeg', 0.9);
+      } catch (err) {
+        console.error('Error en OCR:', err);
+        estadoOCR.textContent = 'Error al procesar imagen ❌';
+      }
     });
-  </script>
 
+    function procesarResultado(resultado) {
+      if (resultado.placa) {
+        inputPlaca.value = resultado.placa;
+        
+        const methodLabel = resultado.method === 'Plate Recognizer' ? '🚀' : '🔧';
+        
+        if (resultado.score < 0.8) {
+          estadoOCR.textContent = `${methodLabel} Duda en lectura ⚠️ (${resultado.placa}). Corrige y CONFIRMA.`;
+        } else {
+          estadoOCR.textContent = `${methodLabel} Placa detectada ✅ (${resultado.placa}). Revisa y CONFIRMA.`;
+        }
+      } else {
+        estadoOCR.textContent = `${resultado.method} - No se detectó placa ❌`;
+        inputPlaca.value = '';
+      }
+    }
+
+    // ==== Resto de tu código (confirmar, etc.) sin cambios ====
+    let enviando = false;
+    let _ultima = { placa:'', t:0 };
+
+    async function existePendiente(placa) {
+      try {
+        const r = await fetch('/api/pendientes', { cache: 'no-store' });
+        const data = await r.json();
+        if (!r.ok) return false;
+        const lista = Array.isArray(data.data) ? data.data : [];
+        return lista.some(x => String(x.placa || '').toUpperCase() === placa);
+      } catch { return false; }
+    }
+
+    btnConfirmar.addEventListener('click', async () => {
+      const placa = normalizar(inputPlaca.value);
+      if (!placa || placa.length < 5) {
+        estadoSend.textContent = 'Placa inválida. Corrige antes de enviar.'; 
+        return;
+      }
+
+      const ahora = Date.now();
+      if (_ultima.placa === placa && (ahora - _ultima.t) < 5000) {
+        estadoSend.textContent = `Ya enviaste ${placa} hace poco.`; 
+        return;
+      }
+
+      if (await existePendiente(placa)) {
+        estadoSend.textContent = `Omitido: ${placa} ya está en pendientes.`; 
+        inputPlaca.value = ''; 
+        return;
+      }
+
+      if (enviando) return;
+      enviando = true; 
+      btnConfirmar.disabled = true;
+
+      try {
+        estadoSend.textContent = 'Enviando...';
+        const imagen = imagenOCRCapturada || imagenActualParaPendiente(video, canvas);
+
+        const r = await fetch('/api/pendientes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ placa, imagen })
+        });
+        
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.msg || 'Error al enviar');
+
+        try { localStorage.setItem('placaDetectadaOCR', placa); } catch {}
+        _ultima = { placa, t: ahora };
+        inputPlaca.value = '';
+        estadoSend.textContent = `Enviado ✅ (${placa}). Permanece en OCR.`;
+        
+      } catch (e) {
+        console.error(e);
+        estadoSend.textContent = 'No se pudo enviar la placa: ' + e.message;
+      } finally {
+        enviando = false; 
+        btnConfirmar.disabled = false;
+      }
+    });
+
+    // UX
+    inputPlaca.addEventListener('input', e => {
+      e.target.value = normalizar(e.target.value);
+    });
+
+    // Inicializar
+    updatePRCount();
+    iniciarCamara();
+  </script>
 </body>
 </html>
